@@ -87,7 +87,7 @@ Jobs that fail all retries are marked dead and listed on **System health** with 
 
 ## Data retention
 
-Set **AI agent → Data retention (days)** per organization (empty keeps data until deleted). An hourly job deletes message content older than that, as well as raw webhook payloads. Sessions, idempotency keys, rate-limit buckets and finished jobs are cleaned up automatically. To delete a single customer's data on request, open the customer and use **Export data** or **Delete all data** ([data-protection.md](data-protection.md)).
+Set **AI agent → Data retention (days)** per organization (empty keeps data until deleted). An hourly job deletes messages, agent runs, tool executions and raw webhook payloads older than that. Raw webhook payloads are deleted after 30 days in any case. Sessions, idempotency keys, rate-limit buckets and finished jobs are cleaned up automatically. To delete a single customer's data on request, open the customer and use **Export data** or **Delete all data** ([data-protection.md](data-protection.md)).
 
 ## Emergency stop
 

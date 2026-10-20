@@ -101,7 +101,7 @@ Each delivery is a `POST` with:
 
 Headers: `X-OpenWa-Event`, `X-OpenWa-Delivery` (the event ID, stable across retries) and `X-OpenWa-Signature`.
 
-Deliveries are durable jobs: non-2xx responses and timeouts (10 s) are retried with exponential backoff up to 8 attempts. Endpoints must be public HTTPS or HTTP URLs; private network addresses are refused unless `ALLOW_PRIVATE_NETWORK_FETCH=true`.
+Deliveries are durable jobs: non-2xx responses and timeouts (10 s) are retried with exponential backoff up to 8 attempts. Endpoints must use HTTPS in production (`NODE_ENV=production`); private network addresses are refused unless `ALLOW_PRIVATE_NETWORK_FETCH=true`.
 
 ### Verifying signatures
 
