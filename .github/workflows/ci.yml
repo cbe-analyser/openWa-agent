@@ -73,4 +73,4 @@ jobs:
       - name: Build image
         run: docker build -t openwa-agent:ci .
       - name: Validate compose file
-        run: POSTGRES_PASSWORD=ci docker compose config -q
+        run: cp .env.example .env && POSTGRES_PASSWORD=ci docker compose config -q
