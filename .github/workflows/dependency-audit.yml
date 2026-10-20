@@ -1,0 +1,25 @@
+name: Dependency audit
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  pull_request:
+    paths: ["package.json", "package-lock.json"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --ignore-scripts
+      - name: Production dependencies (fails on high or critical)
+        run: npm audit --omit=dev --audit-level=high
+      - name: All dependencies (report only)
+        run: npm audit || true

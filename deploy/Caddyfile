@@ -1,0 +1,5 @@
+# Reverse proxy with automatic HTTPS (Let's Encrypt). Set DOMAIN in .env and point DNS at the server.
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy app:3000
+}

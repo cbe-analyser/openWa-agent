@@ -1,0 +1,786 @@
+// OpenWa Agent database schema.
+// Every tenant-owned table carries `orgId`; all service-layer queries filter by it.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+  binaryTargets   = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector]
+}
+
+// ---------------------------------------------------------------------------
+// Identity, tenancy and access
+// ---------------------------------------------------------------------------
+
+enum Role {
+  OWNER
+  ADMIN
+  AGENT
+  VIEWER
+}
+
+enum AutonomyMode {
+  COPILOT
+  SUPERVISED
+  AUTONOMOUS
+}
+
+model Organization {
+  id                   String       @id @default(cuid())
+  name                 String
+  slug                 String       @unique
+  timezone             String       @default("UTC")
+  agentName            String       @default("Support Assistant")
+  businessDescription  String       @default("")
+  agentInstructions    String       @default("")
+  autonomyMode         AutonomyMode @default(COPILOT)
+  aiPaused             Boolean      @default(false)
+  confidenceThreshold  Float        @default(0.7)
+  maxTroubleshootTurns Int          @default(3)
+  autoReplyIntents     String[]     @default(["information_request", "product_enquiry", "technical_problem", "sales_enquiry"])
+  customIntents        Json         @default("[]")
+  retentionDays        Int?
+  optOutKeywords       String[]     @default(["STOP", "UNSUBSCRIBE", "OPT OUT", "OPTOUT"])
+  optInKeywords        String[]     @default(["START", "SUBSCRIBE"])
+  escalationMessage    String       @default("Thanks for your patience. I'm passing this to a member of our team, who will reply here as soon as possible.")
+  followUpTemplateName String?
+  followUpTemplateLang String       @default("en")
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+
+  memberships      Membership[]
+  invitations      Invitation[]
+  apiKeys          ApiKey[]
+  aiProviders      AIProviderConfig[]
+  embeddingConfig  EmbeddingConfig?
+  channels         Channel[]
+  customers        Customer[]
+  conversations    Conversation[]
+  messages         Message[]
+  documents        KnowledgeDocument[]
+  chunks           KnowledgeChunk[]
+  tools            ToolConfig[]
+  toolExecutions   ToolExecution[]
+  tickets          Ticket[]
+  followUps        FollowUp[]
+  agentRuns        AgentRun[]
+  usage            UsageRecord[]
+  auditLogs        AuditLog[]
+  webhookEndpoints WebhookEndpoint[]
+  notes            InternalNote[]
+}
+
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  name            String
+  passwordHash    String
+  isInstanceAdmin Boolean   @default(false)
+  disabled        Boolean   @default(false)
+  failedLogins    Int       @default(0)
+  lockedUntil     DateTime?
+  lastLoginAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  memberships     Membership[]
+  sessions        Session[]
+  assignedConvs   Conversation[] @relation("AssignedConversations")
+  assignedTickets Ticket[]       @relation("AssignedTickets")
+  notes           InternalNote[]
+}
+
+model Membership {
+  id        String   @id @default(cuid())
+  userId    String
+  orgId     String
+  role      Role
+  createdAt DateTime @default(now())
+
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, orgId])
+  @@index([orgId])
+}
+
+model Session {
+  id          String   @id @default(cuid())
+  tokenHash   String   @unique
+  userId      String
+  activeOrgId String?
+  ip          String?
+  userAgent   String?
+  expiresAt   DateTime
+  lastSeenAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Invitation {
+  id          String    @id @default(cuid())
+  orgId       String
+  email       String
+  role        Role
+  tokenHash   String    @unique
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  createdById String?
+  createdAt   DateTime  @default(now())
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+}
+
+model ApiKey {
+  id            String    @id @default(cuid())
+  orgId         String
+  name          String
+  prefix        String    @unique
+  keyHash       String    @unique
+  scopes        String[]
+  expiresAt     DateTime?
+  lastUsedAt    DateTime?
+  revokedAt     DateTime?
+  createdById   String?
+  rotatedFromId String?
+  createdAt     DateTime  @default(now())
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+}
+
+model SystemSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// AI configuration and usage
+// ---------------------------------------------------------------------------
+
+enum AIProviderKind {
+  ANTHROPIC
+  OPENAI_COMPATIBLE
+  OLLAMA
+  MOCK
+}
+
+model AIProviderConfig {
+  id                 String         @id @default(cuid())
+  orgId              String
+  name               String
+  kind               AIProviderKind
+  model              String
+  baseUrl            String?
+  encryptedApiKey    String?
+  maxOutputTokens    Int            @default(1024)
+  temperature        Float?
+  timeoutMs          Int            @default(45000)
+  maxRetries         Int            @default(2)
+  contextTokenLimit  Int            @default(16000)
+  monthlyTokenBudget Int?
+  inputCostPerMTok   Float?
+  outputCostPerMTok  Float?
+  settings           Json           @default("{}")
+  isPrimary          Boolean        @default(false)
+  allowAsFallback    Boolean        @default(false)
+  fallbackPriority   Int            @default(100)
+  enabled            Boolean        @default(true)
+  lastHealthStatus   String?
+  lastHealthAt       DateTime?
+  lastHealthError    String?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  org   Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  usage UsageRecord[]
+
+  @@index([orgId])
+}
+
+enum EmbeddingKind {
+  LOCAL_HASH
+  OPENAI_COMPATIBLE
+  OLLAMA
+}
+
+model EmbeddingConfig {
+  id              String        @id @default(cuid())
+  orgId           String        @unique
+  kind            EmbeddingKind @default(LOCAL_HASH)
+  model           String        @default("local-hash-384")
+  baseUrl         String?
+  encryptedApiKey String?
+  dimensions      Int           @default(384)
+  minRelevance    Float         @default(0.15)
+  updatedAt       DateTime      @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+model UsageRecord {
+  id               String   @id @default(cuid())
+  orgId            String
+  providerConfigId String?
+  agentRunId       String?
+  kind             String
+  provider         String
+  model            String
+  inputTokens      Int      @default(0)
+  outputTokens     Int      @default(0)
+  costUsd          Float?
+  latencyMs        Int?
+  success          Boolean  @default(true)
+  createdAt        DateTime @default(now())
+
+  org            Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  providerConfig AIProviderConfig? @relation(fields: [providerConfigId], references: [id], onDelete: SetNull)
+
+  @@index([orgId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Channels, customers, conversations, messages
+// ---------------------------------------------------------------------------
+
+enum ChannelKind {
+  WHATSAPP_CLOUD
+  SIMULATOR
+}
+
+enum ChannelStatus {
+  PENDING
+  ACTIVE
+  ERROR
+  DISABLED
+}
+
+model Channel {
+  id                   String        @id @default(cuid())
+  orgId                String
+  kind                 ChannelKind
+  name                 String
+  status               ChannelStatus @default(PENDING)
+  phoneNumberId        String?       @unique
+  wabaId               String?
+  displayPhoneNumber   String?
+  apiVersion           String        @default("v21.0")
+  encryptedAccessToken String?
+  encryptedAppSecret   String?
+  verifyTokenHash      String?
+  lastWebhookAt        DateTime?
+  lastError            String?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  org           Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+  webhookEvents WebhookEvent[]
+
+  @@index([orgId])
+}
+
+model Customer {
+  id            String    @id @default(cuid())
+  orgId         String
+  waId          String
+  name          String?
+  profileName   String?
+  email         String?
+  tags          String[]  @default([])
+  locale        String?
+  timezone      String?
+  optedOut      Boolean   @default(false)
+  optedOutAt    DateTime?
+  optedInAt     DateTime?
+  externalRef   String?
+  lastInboundAt DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  org           Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+  tickets       Ticket[]
+  followUps     FollowUp[]
+
+  @@unique([orgId, waId])
+  @@index([orgId, updatedAt])
+}
+
+enum ConversationStatus {
+  OPEN
+  PENDING
+  ESCALATED
+  RESOLVED
+}
+
+enum ControlMode {
+  AI
+  PENDING_HUMAN
+  HUMAN
+}
+
+enum Urgency {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+model Conversation {
+  id             String             @id @default(cuid())
+  orgId          String
+  channelId      String
+  customerId     String
+  status         ConversationStatus @default(OPEN)
+  control        ControlMode        @default(AI)
+  controlVersion Int                @default(0)
+  aiPaused       Boolean            @default(false)
+  assignedToId   String?
+  intent         String?
+  urgency        Urgency            @default(NORMAL)
+  language       String?
+  summary        String?
+  tags           String[]           @default([])
+  unreadCount    Int                @default(0)
+  failedAttempts Int                @default(0)
+  resolutionNote String?
+  lastMessageAt  DateTime           @default(now())
+  lastInboundAt  DateTime?
+  resolvedAt     DateTime?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  org        Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  channel    Channel        @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  customer   Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  assignedTo User?          @relation("AssignedConversations", fields: [assignedToId], references: [id], onDelete: SetNull)
+  messages   Message[]
+  agentRuns  AgentRun[]
+  tickets    Ticket[]
+  followUps  FollowUp[]
+  notes      InternalNote[]
+
+  @@unique([channelId, customerId])
+  @@index([orgId, lastMessageAt])
+  @@index([orgId, status])
+}
+
+enum Direction {
+  INBOUND
+  OUTBOUND
+}
+
+enum AuthorType {
+  CUSTOMER
+  AI
+  HUMAN
+  SYSTEM
+}
+
+enum MessageStatus {
+  RECEIVED
+  PENDING_APPROVAL
+  QUEUED
+  SENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+  REJECTED
+  SUPERSEDED
+}
+
+model Message {
+  id             String        @id @default(cuid())
+  orgId          String
+  conversationId String
+  direction      Direction
+  authorType     AuthorType
+  authorUserId   String?
+  type           String        @default("text")
+  body           String?
+  media          Json?
+  template       Json?
+  externalId     String?
+  channelId      String
+  status         MessageStatus
+  error          String?
+  errorCode      String?
+  agentRunId     String?
+  metadata       Json          @default("{}")
+  createdAt      DateTime      @default(now())
+  sentAt         DateTime?
+  deliveredAt    DateTime?
+  readAt         DateTime?
+
+  org          Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, externalId])
+  @@index([conversationId, createdAt])
+  @@index([orgId, createdAt])
+  @@index([orgId, status])
+}
+
+model InternalNote {
+  id             String   @id @default(cuid())
+  orgId          String
+  conversationId String
+  authorId       String?
+  body           String
+  createdAt      DateTime @default(now())
+
+  org          Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  author       User?        @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId])
+}
+
+enum WebhookEventStatus {
+  RECEIVED
+  PROCESSED
+  IGNORED
+  FAILED
+}
+
+model WebhookEvent {
+  id          String             @id @default(cuid())
+  orgId       String
+  channelId   String
+  dedupeKey   String             @unique
+  payload     Json
+  status      WebhookEventStatus @default(RECEIVED)
+  error       String?
+  receivedAt  DateTime           @default(now())
+  processedAt DateTime?
+
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, receivedAt])
+}
+
+// ---------------------------------------------------------------------------
+// Agent runs and tools
+// ---------------------------------------------------------------------------
+
+model AgentRun {
+  id               String   @id @default(cuid())
+  orgId            String
+  conversationId   String
+  triggerMessageId String   @unique
+  status           String
+  decision         String?
+  intent           String?
+  urgency          String?
+  language         String?
+  confidence       Float?
+  reasons          String[] @default([])
+  citations        Json     @default("[]")
+  steps            Json     @default("[]")
+  provider         String?
+  model            String?
+  inputTokens      Int      @default(0)
+  outputTokens     Int      @default(0)
+  costUsd          Float?
+  latencyMs        Int?
+  error            String?
+  createdAt        DateTime @default(now())
+
+  org          Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  conversation Conversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  tools        ToolExecution[]
+
+  @@index([orgId, createdAt])
+  @@index([conversationId])
+}
+
+enum ToolKind {
+  BUILTIN
+  HTTP
+}
+
+enum ToolPermission {
+  READ
+  WRITE
+  HIGH_IMPACT
+}
+
+model ToolConfig {
+  id               String         @id @default(cuid())
+  orgId            String
+  name             String
+  kind             ToolKind
+  description      String
+  enabled          Boolean        @default(true)
+  permission       ToolPermission @default(READ)
+  requiresApproval Boolean        @default(false)
+  timeoutMs        Int            @default(10000)
+  config           Json           @default("{}")
+  encryptedSecret  String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, name])
+}
+
+enum ToolExecutionStatus {
+  SUCCEEDED
+  FAILED
+  DENIED
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+}
+
+model ToolExecution {
+  id             String              @id @default(cuid())
+  orgId          String
+  agentRunId     String?
+  conversationId String?
+  toolName       String
+  input          Json
+  output         Json?
+  status         ToolExecutionStatus
+  error          String?
+  durationMs     Int?
+  decidedById    String?
+  decidedAt      DateTime?
+  createdAt      DateTime            @default(now())
+
+  org      Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  agentRun AgentRun?    @relation(fields: [agentRunId], references: [id], onDelete: SetNull)
+
+  @@index([orgId, createdAt])
+  @@index([orgId, status])
+}
+
+// ---------------------------------------------------------------------------
+// Tickets and follow-ups
+// ---------------------------------------------------------------------------
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING
+  RESOLVED
+  CLOSED
+}
+
+model Ticket {
+  id             String       @id @default(cuid())
+  number         Int          @default(autoincrement())
+  orgId          String
+  conversationId String?
+  customerId     String?
+  subject        String
+  description    String       @default("")
+  category       String       @default("general")
+  priority       Urgency      @default(NORMAL)
+  status         TicketStatus @default(OPEN)
+  source         String       @default("HUMAN")
+  assignedToId   String?
+  resolutionNote String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  resolvedAt     DateTime?
+
+  org          Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  customer     Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  assignedTo   User?         @relation("AssignedTickets", fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  @@unique([number])
+  @@index([orgId, status])
+}
+
+enum FollowUpStatus {
+  SCHEDULED
+  SENT
+  CANCELLED
+  FAILED
+  SKIPPED
+}
+
+model FollowUp {
+  id             String         @id @default(cuid())
+  orgId          String
+  conversationId String
+  customerId     String
+  kind           String
+  message        String?
+  templateName   String?
+  templateLang   String?
+  dueAt          DateTime
+  timezone       String         @default("UTC")
+  status         FollowUpStatus @default(SCHEDULED)
+  reason         String?
+  createdBy      String
+  dedupeKey      String         @unique
+  attempts       Int            @default(0)
+  lastError      String?
+  completedAt    DateTime?
+  createdAt      DateTime       @default(now())
+
+  org          Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  customer     Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, status, dueAt])
+}
+
+// ---------------------------------------------------------------------------
+// Knowledge base
+// ---------------------------------------------------------------------------
+
+enum DocumentStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+}
+
+model KnowledgeDocument {
+  id          String         @id @default(cuid())
+  orgId       String
+  title       String
+  sourceType  String
+  category    String         @default("general")
+  fileName    String?
+  mimeType    String?
+  url         String?
+  contentHash String
+  text        String
+  status      DocumentStatus @default(PENDING)
+  error       String?
+  chunkCount  Int            @default(0)
+  createdById String?
+  indexedAt   DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  org    Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  chunks KnowledgeChunk[]
+
+  @@index([orgId])
+}
+
+model KnowledgeChunk {
+  id             String                   @id @default(cuid())
+  orgId          String
+  documentId     String
+  ordinal        Int
+  content        String
+  embeddingModel String?
+  embedding      Unsupported("vector")?
+  tsv            Unsupported("tsvector")?
+  createdAt      DateTime                 @default(now())
+
+  org      Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  document KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, documentId])
+}
+
+// ---------------------------------------------------------------------------
+// Jobs, audit, webhooks, idempotency, rate limits
+// ---------------------------------------------------------------------------
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  DEAD
+  CANCELLED
+}
+
+model Job {
+  id          String    @id @default(cuid())
+  type        String
+  orgId       String?
+  payload     Json
+  status      JobStatus @default(PENDING)
+  runAt       DateTime  @default(now())
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(5)
+  dedupeKey   String?   @unique
+  lockedAt    DateTime?
+  lockedBy    String?
+  lastError   String?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([status, runAt])
+  @@index([orgId, type])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  orgId      String?
+  actorType  String
+  actorId    String?
+  action     String
+  targetType String?
+  targetId   String?
+  metadata   Json     @default("{}")
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  org Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, createdAt])
+  @@index([targetType, targetId])
+}
+
+model WebhookEndpoint {
+  id              String    @id @default(cuid())
+  orgId           String
+  url             String
+  description     String    @default("")
+  encryptedSecret String
+  events          String[]
+  enabled         Boolean   @default(true)
+  lastDeliveryAt  DateTime?
+  failureCount    Int       @default(0)
+  createdAt       DateTime  @default(now())
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+}
+
+model IdempotencyKey {
+  id             String   @id @default(cuid())
+  scope          String
+  key            String
+  requestHash    String
+  responseStatus Int
+  responseBody   Json
+  createdAt      DateTime @default(now())
+
+  @@unique([scope, key])
+}
+
+model RateLimitBucket {
+  key         String
+  windowStart DateTime
+  count       Int      @default(0)
+
+  @@id([key, windowStart])
+}

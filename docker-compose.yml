@@ -1,0 +1,83 @@
+# OpenWa Agent — self-hosted stack.
+#   cp .env.example .env   # set ENCRYPTION_KEY, APP_URL, POSTGRES_PASSWORD
+#   docker compose up -d --build
+# Optional profiles:  --profile https (Caddy with automatic TLS),  --profile ollama (local models)
+
+x-app: &app
+  build: .
+  image: openwa-agent:local
+  env_file: .env
+  environment:
+    DATABASE_URL: postgresql://openwa:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/openwa
+  restart: unless-stopped
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: openwa
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: openwa
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openwa -d openwa"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  migrate:
+    <<: *app
+    command: ["npx", "prisma", "migrate", "deploy"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  app:
+    <<: *app
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    <<: *app
+    command: ["node", "dist/worker.cjs"]
+    healthcheck:
+      disable: true
+    stop_grace_period: 30s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  caddy:
+    image: caddy:2.8
+    profiles: ["https"]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:0.12.6
+    profiles: ["ollama"]
+    volumes:
+      - ollama-data:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  db-data:
+  caddy-data:
+  caddy-config:
+  ollama-data:

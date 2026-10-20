@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: openwa
+          POSTGRES_PASSWORD: openwa
+          POSTGRES_DB: openwa_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U openwa" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgresql://openwa:openwa@localhost:5432/openwa_test
+      E2E_DATABASE_URL: postgresql://openwa:openwa@localhost:5432/openwa_e2e
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - name: Secret scan
+        run: npm run secrets:check
+      - name: Lint
+        run: npm run lint
+      - name: Formatting
+        run: npm run format:check
+      - name: Build (app + worker)
+        run: npm run build
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit and integration tests
+        run: npm test
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+      - name: Create E2E database
+        run: PGPASSWORD=openwa psql -h localhost -U openwa -d openwa_test -c "CREATE DATABASE openwa_e2e"
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+      - name: End-to-end tests
+        run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-results
+          path: test-results/
+          retention-days: 7
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t openwa-agent:ci .
+      - name: Validate compose file
+        run: POSTGRES_PASSWORD=ci docker compose config -q
