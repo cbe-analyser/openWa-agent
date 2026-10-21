@@ -52,8 +52,7 @@ export default defineConfig({
       env: { ...e2eEnv, PORT: String(PORT), HOSTNAME: "127.0.0.1" },
       reuseExistingServer: false,
       timeout: 60_000,
-      stdout: "pipe",
     },
-    { command: "node dist/worker.cjs", env: e2eEnv, reuseExistingServer: false, stdout: "pipe" },
+    { command: "node dist/worker.cjs", env: e2eEnv, reuseExistingServer: false },
   ],
 });

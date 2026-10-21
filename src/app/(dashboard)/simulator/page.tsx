@@ -59,7 +59,10 @@ export default function SimulatorPage() {
     { refreshInterval: 1500 },
   );
   const bottom = useRef<HTMLDivElement>(null);
-  useEffect(() => bottom.current?.scrollIntoView({ block: "end" }), [view.data?.messages.length]);
+  // A block body: newer browsers return a Promise from scrollIntoView, which React would call as a cleanup.
+  useEffect(() => {
+    bottom.current?.scrollIntoView({ block: "end" });
+  }, [view.data?.messages.length]);
 
   return (
     <>
