@@ -5,10 +5,35 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    groups:
+      # Packages that must move together, or the build breaks.
+      react:
+        patterns: ["react", "react-dom", "@types/react", "@types/react-dom"]
+      prisma:
+        patterns: ["prisma", "@prisma/client"]
+      next:
+        patterns: ["next", "@next/*", "eslint-config-next"]
+    ignore:
+      # Major upgrades of the framework and tooling are planned by hand.
+      - dependency-name: "next"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@next/*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "prisma"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@prisma/client"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
   - package-ecosystem: docker
     directory: /
     schedule:
