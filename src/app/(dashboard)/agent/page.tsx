@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import useSWR from "swr";
 import { api, fetcher } from "@/lib/api";
 import { timeAgo } from "@/lib/format";
@@ -127,7 +127,7 @@ export default function AgentPage() {
 }
 
 function AgentSettings({ org, onSaved }: { org: Org; onSaved: () => void }) {
-  const [f, setF] = useState(() => ({
+  const [f, setForm] = useState(() => ({
     ...org,
     optOut: org.optOutKeywords.join(", "),
     optIn: org.optInKeywords.join(", "),
@@ -136,7 +136,11 @@ function AgentSettings({ org, onSaved }: { org: Org; onSaved: () => void }) {
   const action = useAsyncAction();
   const pause = useAsyncAction();
   const [saved, setSaved] = useState(false);
-  useEffect(() => setSaved(false), [f]);
+  // Any edit after a save hides the "Saved." note.
+  const setF = (next: typeof f) => {
+    setForm(next);
+    setSaved(false);
+  };
   const allIntents = [...BUILTIN_INTENTS.map((i) => i.name), ...(org.customIntents ?? []).map((c) => c.name)];
 
   return (

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { use, useEffect, useState } from "react";
+import { use, useState } from "react";
 import useSWR from "swr";
 import { api, fetcher } from "@/lib/api";
 import { customerName, dateTime, timeAgo } from "@/lib/format";
@@ -53,14 +53,13 @@ interface CustomerDetail {
 export default function CustomerPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const { data, error, isLoading, mutate } = useSWR<CustomerDetail>(`/api/v1/customers/${id}`, fetcher);
-  const [form, setForm] = useState({ name: "", email: "", tags: "" });
+  // Unsaved edits; until the first edit the form shows the stored values.
+  const [draft, setForm] = useState<{ name: string; email: string; tags: string } | null>(null);
   const save = useAsyncAction();
-  useEffect(() => {
-    if (data) setForm({ name: data.name ?? "", email: data.email ?? "", tags: data.tags.join(", ") });
-  }, [data]);
   if (isLoading) return <Spinner />;
   if (error) return <ErrorState error={error} retry={() => mutate()} />;
   if (!data) return null;
+  const form = draft ?? { name: data.name ?? "", email: data.email ?? "", tags: data.tags.join(", ") };
   return (
     <>
       <PageHeader
@@ -74,7 +73,7 @@ export default function CustomerPage({ params }: { params: Promise<{ id: string 
               className="space-y-3"
               onSubmit={async (e) => {
                 e.preventDefault();
-                await save.run(() =>
+                const updated = await save.run(() =>
                   api(`/api/v1/customers/${id}`, {
                     method: "PATCH",
                     body: {
@@ -87,7 +86,9 @@ export default function CustomerPage({ params }: { params: Promise<{ id: string 
                     },
                   }),
                 );
+                if (updated === undefined) return; // keep the edits; the error is shown
                 await mutate();
+                setForm(null);
               }}
             >
               <Field label="Name" htmlFor="n">
