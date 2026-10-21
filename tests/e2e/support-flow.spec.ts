@@ -5,6 +5,14 @@ test.describe.configure({ mode: "serial" });
 test("sign in, chat as a customer, get a grounded AI reply, take over and answer as a human", async ({
   page,
 }, testInfo) => {
+  // Temporary diagnostics for the Playwright 1.64 upgrade.
+  page.on("pageerror", (e) => console.log(`[pageerror] ${e.message}`));
+  page.on("console", (m) => m.type() === "error" && console.log(`[console] ${m.text()}`));
+  page.on(
+    "response",
+    (r) => r.status() >= 400 && console.log(`[http ${r.status()}] ${r.request().method()} ${r.url()}`),
+  );
+  page.on("framenavigated", (f) => f === page.mainFrame() && console.log(`[nav] ${f.url()}`));
   // A unique customer number per run and project keeps runs independent.
   const from = `2547${String(Date.now()).slice(-7)}${testInfo.project.name === "mobile" ? 2 : 1}`;
 

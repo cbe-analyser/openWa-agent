@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import useSWR from "swr";
 import { api, fetcher } from "@/lib/api";
 import { timeAgo } from "@/lib/format";
@@ -49,10 +49,15 @@ interface Template {
 
 const STATUS_TONE = { PENDING: "yellow", ACTIVE: "green", ERROR: "red", DISABLED: "gray" } as const;
 
+const noSubscription = () => () => {};
+
+/** The browser's origin; empty during server rendering. */
 function useOrigin() {
-  const [origin, setOrigin] = useState("");
-  useEffect(() => setOrigin(window.location.origin), []);
-  return origin;
+  return useSyncExternalStore(
+    noSubscription,
+    () => window.location.origin,
+    () => "",
+  );
 }
 
 export default function ConnectionsPage() {
