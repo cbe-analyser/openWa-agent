@@ -32,7 +32,7 @@
     "@anthropic-ai/sdk": "0.135.0",
     "@prisma/client": "6.19.3",
     "clsx": "2.1.1",
-    "lucide-react": "1.60.0",
+    "lucide-react": "1.61.0",
     "mammoth": "1.13.0",
     "next": "15.5.28",
     "openai": "7.39.0",
